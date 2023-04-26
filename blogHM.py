@@ -34,13 +34,12 @@ if __name__ == '__main__':
     #device = 'cpu'
     print("You are using device: %s" % device)
 
-    #data_dir = "./hateful_memes/"
-    data_dir = "./HatefulMemes/"
+    data_dir = Path.cwd().parent / "data" / "final" / "public"
 
-    #img_tar_path = data_dir / "img.tar.gz"
-    train_path = data_dir + "train.jsonl"
-    dev_path = data_dir + "dev.jsonl"
-    test_path = data_dir + "test.jsonl"
+    img_tar_path = data_dir / "img.tar.gz"
+    train_path = data_dir / "train.jsonl"
+    dev_path = data_dir / "dev.jsonl"
+    test_path = data_dir / "test.jsonl"
 
     #train_samples_frame = pd.read_json(train_path, lines=True)
     ##print(train_samples_frame.head())

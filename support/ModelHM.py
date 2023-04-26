@@ -27,6 +27,15 @@ warnings.filterwarnings("ignore")
 logging.getLogger().setLevel(logging.WARNING)
 
 
+import pytorch_lightning as pl
+
+
+# for the purposes of this post, we'll filter
+# much of the lovely logging info from our LightningModule
+warnings.filterwarnings("ignore")
+logging.getLogger().setLevel(logging.WARNING)
+
+
 class HatefulMemesModel(pl.LightningModule):
     def __init__(self, hparams):
         for data_key in ["train_path", "dev_path", "img_dir",]:
@@ -37,10 +46,7 @@ class HatefulMemesModel(pl.LightningModule):
                 )
         
         super(HatefulMemesModel, self).__init__()
-
-        #self.hparams = hparams
-        for key in hparams.keys():
-            self.hparams[key]=hparams[key]
+        self.hparams = hparams
         
         # assign some hparams that get used in multiple places
         self.embedding_dim = self.hparams.get("embedding_dim", 300)
@@ -65,15 +71,7 @@ class HatefulMemesModel(pl.LightningModule):
         # set up model and training
         self.model = self._build_model()
         self.trainer_params = self._get_trainer_params()
-
-        # ARB
-        self.val_loss = []
-        self.train_loss = []
-        self.val_acc = []
-        self.train_acc = []
-        self.val_auroc = []        
-        self.train_auroc = []
-
+    
     ## Required LightningModule Methods (when validating) ##
     
     def forward(self, text, image, label=None):
@@ -85,13 +83,8 @@ class HatefulMemesModel(pl.LightningModule):
             image=batch["image"], 
             label=batch["label"]
         )
-        # ARB
-        acc = preds[torch.arange(preds.shape[0]), batch["label"]]
-        ave_acc = acc.mean()
-        metric = BinaryAUROC(thresholds=5).to('cuda')
-        acc_auroc = metric(acc, batch["label"])
         
-        return {"loss": loss, "training_loss": loss, "ave_acc": ave_acc, "acc_auroc": acc_auroc}
+        return {"loss": loss}
 
     def validation_step(self, batch, batch_nb):
         preds, loss = self.eval().forward(
@@ -99,13 +92,8 @@ class HatefulMemesModel(pl.LightningModule):
             image=batch["image"], 
             label=batch["label"]
         )
-        # ARB
-        acc = preds[torch.arange(preds.shape[0]), batch["label"]]
-        ave_acc = acc.mean()
-        metric = BinaryAUROC(thresholds=5).to('cuda')
-        acc_auroc = metric(acc, batch["label"])
         
-        return {"batch_val_loss": loss, "ave_acc": ave_acc, "acc_auroc": acc_auroc}
+        return {"batch_val_loss": loss}
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack(
@@ -114,120 +102,27 @@ class HatefulMemesModel(pl.LightningModule):
                 for output in outputs
             )
         ).mean()
-        avg_acc = torch.stack(
-            tuple(
-                output["ave_acc"] 
-                for output in outputs
-            )
-        ).mean()
-        avg_auroc = torch.stack(
-            tuple(
-                output["acc_auroc"] 
-                for output in outputs
-            )
-        ).mean()
-
-        self.val_loss.append(avg_loss.cpu())
-        self.val_acc.append(avg_acc.cpu())
-        self.val_auroc.append(avg_auroc.cpu())
         
         return {
             "val_loss": avg_loss,
-            "progress_bar":{"val_loss": avg_loss, "val_acc": avg_acc, "val_auroc": avg_auroc}
+            "progress_bar":{"avg_val_loss": avg_loss}
         }
-    
-    def training_epoch_end(self, outputs):
-        # ARB
-        avg_loss = torch.stack(
-            tuple(
-                output["training_loss"] 
-                for output in outputs
-            )
-        ).mean()
-        avg_acc = torch.stack(
-            tuple(
-                output["ave_acc"] 
-                for output in outputs
-            )
-        ).mean()
-        avg_auroc = torch.stack(
-            tuple(
-                output["acc_auroc"] 
-                for output in outputs
-            )
-        ).mean()
-
-        self.train_loss.append(avg_loss.cpu())
-        self.train_acc.append(avg_acc.cpu())
-        self.train_auroc.append(avg_auroc.cpu())
-
-        torch.save({
-            'epoch': self.current_epoch,
-            'model_state_dict': self.state_dict(),
-            'loss': self.train_loss
-        }, "checkpoint_" + str(self.current_epoch) + ".pt")
-    
-    @torch.no_grad()
-    def get_visuals(self):
-        # ARB
-
-        plt.plot(self.train_loss, label='train')
-        plt.plot(self.val_loss, label='validation')
-        plt.xlabel('epoch')
-        plt.ylabel('loss')
-        plt.legend()
-        plt.savefig('myloss.png')
-        plt.close()
-
-        plt.plot(self.train_acc, label='train')
-        plt.plot(self.val_acc, label='validation')
-        plt.xlabel('epoch')
-        plt.ylabel('acc')
-        plt.legend()
-        plt.savefig('myAcc.png')
-        plt.close()
-
-        plt.plot(self.train_auroc, label='train')
-        plt.plot(self.val_auroc, label='validation')
-        plt.xlabel('epoch')
-        plt.ylabel('auroc')
-        plt.legend()
-        plt.savefig('myAuroc.png')
-        plt.close()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-                        self.model.parameters(), 
-                        lr=self.hparams.get("lr", 0.001)
-                    )
-        
-        # ARB
-        fcn = lambda epoch: 0.95 ** epoch
-
-        return {
-                'optimizer': optimizer,
-                'lr_scheduler': {
-                    #'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
-                    'scheduler': torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=fcn),
-                    #'monitor': 'batch_val_loss',          
-                }
-        }
+        optimizers = [
+            torch.optim.AdamW(
+                self.model.parameters(), 
+                lr=self.hparams.get("lr", 0.001)
+            )
+        ]
+        schedulers = [
+            torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizers[0]
+            )
+        ]
+        return optimizers, schedulers
     
-    #def configure_optimizers(self):
-    #    optimizers = [
-    #        torch.optim.AdamW(
-    #            self.model.parameters(), 
-    #            lr=self.hparams.get("lr", 0.001)
-    #        )
-    #    ]
-    #    #schedulers = [
-    #    #    torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #    #        optimizers[0]
-    #    #    )
-    #    #]
-    #    return optimizers#, schedulers
-    
-    #@pl.data_loader
+    @pl.data_loader
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
             self.train_dataset, 
@@ -236,7 +131,7 @@ class HatefulMemesModel(pl.LightningModule):
             num_workers=self.hparams.get("num_workers", 16)
         )
 
-    #@pl.data_loader
+    @pl.data_loader
     def val_dataloader(self):
         return torch.utils.data.DataLoader(
             self.dev_dataset, 
@@ -249,16 +144,7 @@ class HatefulMemesModel(pl.LightningModule):
     
     def fit(self):
         self._set_seed(self.hparams.get("random_state", 42))
-        #self.trainer = pl.Trainer(**self.trainer_params)
-        self.trainer = pl.Trainer(
-            callbacks=[self.trainer_params['checkpoint_callback']],#, self.trainer_params['early_stop_callback']],
-            default_root_dir=self.trainer_params['default_save_path'],
-            accumulate_grad_batches=self.trainer_params['accumulate_grad_batches'],
-            gpus=self.trainer_params['gpus'],
-            max_epochs=self.trainer_params['max_epochs'],
-            gradient_clip_val=self.trainer_params['gradient_clip_val']
-        )
-
+        self.trainer = pl.Trainer(**self.trainer_params)
         self.trainer.fit(self)
         
     def _set_seed(self, seed):
@@ -269,42 +155,22 @@ class HatefulMemesModel(pl.LightningModule):
             torch.cuda.manual_seed_all(seed)
 
     def _build_text_transform(self):
-        ##with tempfile.NamedTemporaryFile() as ft_training_data:
-        #with tempfile.NamedTemporaryFile(mode='w', encoding='utf8') as ft:
-        #    #ft_path = Path(ft_training_data.name)
-        #    ft_path = Path(ft.name)
-        #    #with ft_path.open("w") as ft:
-        #    # had to tab the group below left one because of above commentout
-        #    training_data = [
-        #        json.loads(line)["text"] + "/n" 
-        #        for line in open(
-        #            self.hparams.get("train_path"), encoding='utf-8'
-        #        ).read().splitlines()
-        #    ]
-        #    for line in training_data:
-        #        ft.write(line + "\n")
-        #    language_transform = fasttext.train_unsupervised(
-        #        #str(ft_path),
-        #        str(ft),
-        #        model=self.hparams.get("fasttext_model", "cbow"),
-        #        dim=self.embedding_dim
-        #    )
-        f = open('temp.txt', mode= 'w', encoding='utf-8')
-        training_data = [
-            json.loads(line)["text"] + "/n" 
-            for line in open(
-                self.hparams.get("train_path"), encoding='utf-8'
-            ).read().splitlines()
-        ]
-        for line in training_data:
-            f.write(line + "\n")
-        language_transform = fasttext.train_unsupervised(
-            'temp.txt',
-            model=self.hparams.get("fasttext_model", "cbow"),
-            dim=self.embedding_dim
-        )
-        f.close()
-
+        with tempfile.NamedTemporaryFile() as ft_training_data:
+            ft_path = Path(ft_training_data.name)
+            with ft_path.open("w") as ft:
+                training_data = [
+                    json.loads(line)["text"] + "/n" 
+                    for line in open(
+                        self.hparams.get("train_path")
+                    ).read().splitlines()
+                ]
+                for line in training_data:
+                    ft.write(line + "\n")
+                language_transform = fasttext.train_unsupervised(
+                    str(ft_path),
+                    model=self.hparams.get("fasttext_model", "cbow"),
+                    dim=self.embedding_dim
+                )
         return language_transform
     
     def _build_image_transform(self):
@@ -376,11 +242,9 @@ class HatefulMemesModel(pl.LightningModule):
     
     def _get_trainer_params(self):
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
-            #filepath=self.output_path,
-            dirpath=self.output_path,
+            filepath=self.output_path,
             monitor=self.hparams.get(
-                #"checkpoint_monitor", "avg_val_loss"
-                "checkpoint_monitor", None
+                "checkpoint_monitor", "avg_val_loss"
             ),
             mode=self.hparams.get(
                 "checkpoint_monitor_mode", "min"
