@@ -91,12 +91,14 @@ class HatefulMemesModel(pl.LightningModule):
             label=batch["label"]
         )
         # ARB
-        acc = preds[torch.arange(preds.shape[0]), batch["label"]]
+        preds = preds.to('cpu').detach()
+        labels = batch["label"].to('cpu').detach()
+        acc = preds[torch.arange(preds.shape[0]), labels]
         ave_acc = acc.mean()
-        metric = BinaryAUROC(thresholds=5).to('cuda')
-        acc_auroc = metric(acc, batch["label"])
+        metric = BinaryAUROC(thresholds=5)
+        acc_auroc = metric(acc, labels)
         
-        return {"loss": loss, "training_loss": loss, "ave_acc": ave_acc, "acc_auroc": acc_auroc}
+        return {"loss": loss, "ave_acc": ave_acc, "acc_auroc": acc_auroc}
 
     def validation_step(self, batch, batch_nb):
         preds, loss = self.eval().forward(
@@ -106,17 +108,19 @@ class HatefulMemesModel(pl.LightningModule):
             label=batch["label"]
         )
         # ARB
-        acc = preds[torch.arange(preds.shape[0]), batch["label"]]
+        preds = preds.to('cpu').detach()
+        labels = batch["label"].to('cpu').detach()
+        acc = preds[torch.arange(preds.shape[0]), labels]
         ave_acc = acc.mean()
-        metric = BinaryAUROC(thresholds=5).to('cuda')
-        acc_auroc = metric(acc, batch["label"])
+        metric = BinaryAUROC(thresholds=5)
+        acc_auroc = metric(acc, labels)
         
-        return {"batch_val_loss": loss, "ave_acc": ave_acc, "acc_auroc": acc_auroc}
+        return {"loss": loss, "ave_acc": ave_acc, "acc_auroc": acc_auroc}
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack(
             tuple(
-                output["batch_val_loss"] 
+                output["loss"] 
                 for output in outputs
             )
         ).mean()
@@ -146,7 +150,7 @@ class HatefulMemesModel(pl.LightningModule):
         # ARB
         avg_loss = torch.stack(
             tuple(
-                output["training_loss"] 
+                output["loss"] 
                 for output in outputs
             )
         ).mean()
